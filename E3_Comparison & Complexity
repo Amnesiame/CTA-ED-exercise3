@@ -1,0 +1,271 @@
+
+# Preparion
+```{r, echo=F}
+library(kableExtra)
+library(readr) # more informative and easy way to import data
+library(quanteda) # includes functions to implement Lexicoder
+library(quanteda.textstats) # for estimating similarity and complexity measures
+library(stringdist) # for basic character-based distance measures
+library(dplyr) #for wrangling data
+library(tibble) #for wrangling data
+library(ggplot2) #for visualization
+```
+
+
+# Original Example
+```{r}
+tweets  <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/cabinet_tweets.rds?raw=true")))
+
+head(tweets)
+unique(tweets$username)
+length(unique(tweets$username))
+
+## Generate document feature matrix
+
+#make corpus object, specifying tweet as text field
+tweets_corpus <- corpus(tweets, text_field = "tweet")
+
+#add in username document-level information
+docvars(tweets_corpus, "username") <- tweets$username
+
+tweets_corpus
+
+dfmat <- dfm(tokens(tweets_corpus),
+             remove_punct = TRUE, 
+             remove = stopwords("english"))
+
+dfmat
+ 
+
+## Compare between MPs
+
+corrmat <- dfmat %>%
+  dfm_group(groups = username) %>%
+  textstat_simil(margin = "documents", method = "correlation")
+
+corrmat[1:5,1:5]
+
+
+## Compare between measures
+
+
+#estimate similarity, grouping by username
+
+cos_sim <- dfmat %>%
+  dfm_group(groups = username) %>%
+  textstat_simil(margin = "documents", method = "cosine") #specify method here as character object
+
+cosmat <- as.matrix(cos_sim) #convert to a matrix
+
+#generate data frame keeping only the row for Theresa May
+cosmatdf <- as.data.frame(cosmat[23, c(1:22, 24)])
+
+#rename column
+colnames(cosmatdf) <- "corr_may"
+  
+#create column variable from rownames
+cosmatdf <- tibble::rownames_to_column(cosmatdf, "username")
+
+ggplot(cosmatdf) +
+  geom_point(aes(x=reorder(username, -corr_may), y= corr_may)) + 
+  coord_flip() +
+  xlab("MP username") +
+  ylab("Cosine similarity score") + 
+  theme_minimal()
+
+
+
+#specify different similarity measures to explore
+methods <- c("correlation", "cosine", "dice", "edice")
+
+#create empty dataframe
+testdf_all <- data.frame()
+
+#gen for loop across methods types
+for (i in seq_along(methods)) {
+  
+  #pass method to character string object
+  sim_method <- methods[[i]]
+  
+  #estimate similarity, grouping by username
+  test <- dfmat %>%
+    dfm_group(groups = username) %>%
+    textstat_simil(margin = "documents", method = sim_method) #specify method here as character object created above
+  
+  testm <- as.matrix(test) #convert to a matrix
+  
+  #generate data frame keeping only the row for Theresa May
+  testdf <- as.data.frame(testm[23, c(1:22, 24)])
+  
+  #rename column
+  colnames(testdf) <- "corr_may"
+  
+  #create column variable from rownames
+  testdf <- tibble::rownames_to_column(testdf, "username")
+  
+  #record method in new column variable
+  testdf$method <- sim_method
+
+  #bind all together
+  testdf_all <- rbind(testdf_all, testdf)  
+  
+}
+
+#create variable (for viz only) that is mean of similarity scores for each MP
+testdf_all <- testdf_all %>%
+  group_by(username) %>%
+  mutate(mean_sim = mean(corr_may))
+
+ggplot(testdf_all) +
+  geom_point( aes(x=reorder(username, -mean_sim), y= corr_may, color = method)) + 
+  coord_flip() +
+  xlab("MP username") +
+  ylab("Similarity score") + 
+  theme_minimal()
+
+
+## Complexity
+
+
+speeches  <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/speeches.rds?raw=true")))
+
+
+head(speeches)
+
+speeches$flesch.kincaid <- textstat_readability(speeches$text, measure = "Flesch.Kincaid")
+
+# returned as quanteda data.frame with document-level information;
+# need just the score:
+speeches$flesch.kincaid <- speeches$flesch.kincaid$Flesch.Kincaid
+
+#get mean and standard deviation of Flesch-Kincaid, and N of speeches for each speaker
+sum_corpus <- speeches %>%
+  group_by(speaker) %>%
+  summarise(mean = mean(flesch.kincaid, na.rm=TRUE),
+                   SD=sd(flesch.kincaid, na.rm=TRUE),
+                   N=length(speaker))
+
+# calculate standard errors and confidence intervals
+sum_corpus$se <- sum_corpus$SD / sqrt(sum_corpus$N)
+sum_corpus$min <- sum_corpus$mean - 1.96*sum_corpus$se
+sum_corpus$max <- sum_corpus$mean + 1.96*sum_corpus$se
+
+sum_corpus
+
+ggplot(sum_corpus, aes(x=speaker, y=mean)) +
+  geom_bar(stat="identity") + 
+  geom_errorbar(ymin=sum_corpus$min,ymax=sum_corpus$max, width=.2) +
+  coord_flip() +
+  xlab("") +
+  ylab("Mean Complexity") + 
+  theme_minimal() + 
+  ylim(c(0,20))
+
+```
+
+
+# Exercise 1
+# Compute distance measures such as "euclidean" or "manhattan" for the MP tweets as above, comparing between tweets by MPs and tweets by PM, Theresa May. 
+```{r}
+# 读取数据
+tweets <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/cabinet_tweets.rds?raw=true")))
+
+# 创建文档特征矩阵
+tweets_corpus <- corpus(tweets, text_field = "tweet")
+docvars(tweets_corpus, "username") <- tweets$username
+dfmat <- dfm(tokens(tweets_corpus), remove_punct = TRUE, remove = stopwords("english"))
+
+# 指定不同的距离度量来探索
+methods <- c("euclidean", "manhattan")
+
+# 创建空数据框
+distdf_all <- data.frame()
+
+# 循环遍历各种距离度量方法
+for (i in seq_along(methods)) {
+  # 传递度量方法到字符字符串对象
+  dist_method <- methods[[i]]
+  
+  # 估计距离，按用户名分组
+  dist <- dfmat %>%
+    dfm_group(groups = username) %>%
+    textstat_dist(margin = "documents", method = dist_method) # 在这里指定方法
+  
+  distm <- as.matrix(dist) # 转换为矩阵
+  
+  # 生成数据框，只保留特雷莎·梅的行
+  distdf <- as.data.frame(distm[23, c(1:22, 24)])
+  
+  # 重命名列
+  colnames(distdf) <- "dist_may"
+  
+  # 从行名创建列变量
+  distdf <- tibble::rownames_to_column(distdf, "username")
+  
+  # 记录方法到新的列变量中
+  distdf$method <- dist_method
+  
+  # 合并所有结果
+  distdf_all <- rbind(distdf_all, distdf)  
+}
+
+# 可视化结果
+ggplot(distdf_all) +
+  geom_point(aes(x=reorder(username, -dist_may), y=dist_may, color=method)) + 
+  coord_flip() +
+  xlab("MP username") +
+  ylab("Distance score") +
+  theme_minimal()
+
+```
+
+# Exercise 2
+# Estimate at least three other complexity measures for the EU speeches as above. Consider how the results compare to the Flesch-Kincaid measure used in the article by @schoonvelde_liberals_2019.
+
+```{r}
+# 读取演讲数据
+speeches <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/speeches.rds?raw=true")))
+
+# 计算 Gunning Fog Index
+speeches$gunning_fog <- textstat_readability(speeches$text, measure = "Gunning.Fog")$Gunning.Fog
+
+# 计算 SMOG Index
+speeches$smog <- textstat_readability(speeches$text, measure = "SMOG")$SMOG
+
+# 计算 Coleman-Liau Index
+speeches$coleman_liau <- textstat_readability(speeches$text, measure = "Coleman.Liau")$Coleman.Liau
+
+# 获取每位演讲者的平均复杂性度量和标准差
+sum_corpus_complexity <- speeches %>%
+  group_by(speaker) %>%
+  summarise(mean_fk = mean(flesch.kincaid, na.rm=TRUE),
+            mean_gf = mean(gunning_fog, na.rm=TRUE),
+            mean_smog = mean(smog, na.rm=TRUE),
+            mean_cl = mean(coleman_liau, na.rm=TRUE),
+            SD_fk=sd(flesch.kincaid, na.rm=TRUE),
+            SD_gf=sd(gunning_fog, na.rm=TRUE),
+            SD_smog=sd(smog, na.rm=TRUE),
+            SD_cl=sd(coleman_liau, na.rm=TRUE),
+            N=length(speaker))
+
+# 计算标准误差和置信区间（以 Flesch-Kincaid 为例）
+sum_corpus_complexity$se_fk <- sum_corpus_complexity$SD_fk / sqrt(sum_corpus_complexity$N)
+sum_corpus_complexity$min_fk <- sum_corpus_complexity$mean_fk - 1.96*sum_corpus_complexity$se_fk
+sum_corpus_complexity$max_fk <- sum_corpus_complexity$mean_fk + 1.96*sum_corpus_complexity$se_fk
+
+# 可视化结果（以 Flesch-Kincaid 为例）
+ggplot(sum_corpus_complexity, aes(x=speaker, y=mean_fk)) +
+  geom_bar(stat="identity") + 
+  geom_errorbar(ymin=sum_corpus_complexity$min_fk, ymax=sum_corpus_complexity$max_fk, width=.2) +
+  coord_flip() +
+  xlab("") +
+  ylab("Mean Complexity (Flesch-Kincaid)") +
+  theme_minimal() + 
+  ylim(c(0,20))
+
+```
+
+# Exercise 3 (Advanced---optional) 
+# Estimate similarity scores between the MP tweets and the PM tweets for each week contained in the data. Plot the results. 
+
+In process.
