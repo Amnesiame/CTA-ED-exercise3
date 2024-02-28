@@ -167,49 +167,34 @@ ggplot(sum_corpus, aes(x=speaker, y=mean)) +
 # Exercise 1
 # Compute distance measures such as "euclidean" or "manhattan" for the MP tweets as above, comparing between tweets by MPs and tweets by PM, Theresa May. 
 ```{r}
-# 读取数据
+# Data
 tweets <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/cabinet_tweets.rds?raw=true")))
 
-# 创建文档特征矩阵
+# Matrix
 tweets_corpus <- corpus(tweets, text_field = "tweet")
 docvars(tweets_corpus, "username") <- tweets$username
 dfmat <- dfm(tokens(tweets_corpus), remove_punct = TRUE, remove = stopwords("english"))
 
-# 指定不同的距离度量来探索
+# Measures
 methods <- c("euclidean", "manhattan")
 
-# 创建空数据框
+# For
 distdf_all <- data.frame()
 
-# 循环遍历各种距离度量方法
 for (i in seq_along(methods)) {
-  # 传递度量方法到字符字符串对象
   dist_method <- methods[[i]]
-  
-  # 估计距离，按用户名分组
   dist <- dfmat %>%
     dfm_group(groups = username) %>%
-    textstat_dist(margin = "documents", method = dist_method) # 在这里指定方法
-  
-  distm <- as.matrix(dist) # 转换为矩阵
-  
-  # 生成数据框，只保留特雷莎·梅的行
+    textstat_dist(margin = "documents", method = dist_method)
+  distm <- as.matrix(dist)
   distdf <- as.data.frame(distm[23, c(1:22, 24)])
-  
-  # 重命名列
   colnames(distdf) <- "dist_may"
-  
-  # 从行名创建列变量
   distdf <- tibble::rownames_to_column(distdf, "username")
-  
-  # 记录方法到新的列变量中
   distdf$method <- dist_method
-  
-  # 合并所有结果
   distdf_all <- rbind(distdf_all, distdf)  
 }
 
-# 可视化结果
+# Plot
 ggplot(distdf_all) +
   geom_point(aes(x=reorder(username, -dist_may), y=dist_may, color=method)) + 
   coord_flip() +
@@ -223,45 +208,75 @@ ggplot(distdf_all) +
 # Estimate at least three other complexity measures for the EU speeches as above. Consider how the results compare to the Flesch-Kincaid measure used in the article by @schoonvelde_liberals_2019.
 
 ```{r}
-# 读取演讲数据
-speeches <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/speeches.rds?raw=true")))
+# Data
+speeches <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/comparison-complexity/cabinet_tweets.rds?raw=true")))
 
-# 计算 Gunning Fog Index
-speeches$gunning_fog <- textstat_readability(speeches$text, measure = "Gunning.Fog")$Gunning.Fog
+# Format
+speeches$text <- as.character(speeches$text)
 
-# 计算 SMOG Index
-speeches$smog <- textstat_readability(speeches$text, measure = "SMOG")$SMOG
+# Flesch-Kincaid 
+fk_scores <- textstat_readability(speeches$text, measure = "Flesch.Kincaid")
+speeches$flesch_kincaid <- fk_scores$Flesch.Kincaid
 
-# 计算 Coleman-Liau Index
-speeches$coleman_liau <- textstat_readability(speeches$text, measure = "Coleman.Liau")$Coleman.Liau
+# Dale-Chall
+dc_scores <- textstat_readability(speeches$text, measure = "Dale.Chall")
+speeches$dale_chall <- dc_scores$Dale.Chall
 
-# 获取每位演讲者的平均复杂性度量和标准差
+# Coleman-Liau
+cl_scores <- textstat_readability(speeches$text, measure = "Coleman.Liau")
+speeches$coleman_liau <- cl_scores$Coleman.Liau
+
+# SMOG
+smog_scores <- textstat_readability(speeches$text, measure = "SMOG")
+speeches$smog <- smog_scores$SMOG
+
+# Average + Standard deviations + sample sizes + 95% confidence intervals
 sum_corpus_complexity <- speeches %>%
   group_by(speaker) %>%
-  summarise(mean_fk = mean(flesch.kincaid, na.rm=TRUE),
-            mean_gf = mean(gunning_fog, na.rm=TRUE),
-            mean_smog = mean(smog, na.rm=TRUE),
+  summarise(mean_fk = mean(flesch_kincaid, na.rm=TRUE),
+            mean_dc = mean(dale_chall, na.rm=TRUE),
             mean_cl = mean(coleman_liau, na.rm=TRUE),
-            SD_fk=sd(flesch.kincaid, na.rm=TRUE),
-            SD_gf=sd(gunning_fog, na.rm=TRUE),
-            SD_smog=sd(smog, na.rm=TRUE),
-            SD_cl=sd(coleman_liau, na.rm=TRUE),
-            N=length(speaker))
+            mean_smog = mean(smog, na.rm=TRUE),
+            SD_fk = sd(flesch_kincaid, na.rm=TRUE),
+            SD_dc = sd(dale_chall, na.rm=TRUE),
+            SD_cl = sd(coleman_liau, na.rm=TRUE),
+            SD_smog = sd(smog, na.rm=TRUE),
+            N = n()) %>%
+  mutate(se_fk = SD_fk / sqrt(N),
+         min_fk = mean_fk - 1.96 * se_fk,
+         max_fk = mean_fk + 1.96 * se_fk)
 
-# 计算标准误差和置信区间（以 Flesch-Kincaid 为例）
-sum_corpus_complexity$se_fk <- sum_corpus_complexity$SD_fk / sqrt(sum_corpus_complexity$N)
-sum_corpus_complexity$min_fk <- sum_corpus_complexity$mean_fk - 1.96*sum_corpus_complexity$se_fk
-sum_corpus_complexity$max_fk <- sum_corpus_complexity$mean_fk + 1.96*sum_corpus_complexity$se_fk
+# Plot Flesch-Kincaid
+ggplot(speeches, aes(x=flesch_kincaid)) +
+  geom_histogram(binwidth = 1, fill="blue", color="black") +
+  theme_minimal() +
+  ggtitle("Flesch-Kincaid Grade Level Distribution") +
+  xlab("Flesch-Kincaid Grade Level") +
+  ylab("Frequency")
 
-# 可视化结果（以 Flesch-Kincaid 为例）
-ggplot(sum_corpus_complexity, aes(x=speaker, y=mean_fk)) +
-  geom_bar(stat="identity") + 
-  geom_errorbar(ymin=sum_corpus_complexity$min_fk, ymax=sum_corpus_complexity$max_fk, width=.2) +
-  coord_flip() +
-  xlab("") +
-  ylab("Mean Complexity (Flesch-Kincaid)") +
-  theme_minimal() + 
-  ylim(c(0,20))
+# Plot Dale-Chall
+ggplot(speeches, aes(x=dale_chall)) +
+  geom_histogram(binwidth = 0.5, fill="yellow", color="black") +
+  theme_minimal() +
+  ggtitle("Dale-Chall Readability Formula Distribution") +
+  xlab("Dale-Chall Score") +
+  ylab("Frequency")
+
+# Plot Coleman-Liau
+ggplot(speeches, aes(x=coleman_liau)) +
+  geom_histogram(binwidth = 0.5, fill="red", color="black") +
+  theme_minimal() +
+  ggtitle("Coleman-Liau Index Distribution") +
+  xlab("Coleman-Liau Index") +
+  ylab("Frequency")
+
+# Plot SMOG
+ggplot(speeches, aes(x=smog)) +
+  geom_histogram(binwidth = 0.5, fill="green", color="black") +
+  theme_minimal() +
+  ggtitle("SMOG Index Distribution") +
+  xlab("SMOG Index") +
+  ylab("Frequency")
 
 ```
 
